@@ -1,0 +1,9 @@
+{
+    "Admin": "管理员",
+    "Doctor": "医生",
+    "Logout": "登出",
+    "home": {
+      "Title": "首页"
+    },
+    "Hello": "你好, {name}!"
+  }

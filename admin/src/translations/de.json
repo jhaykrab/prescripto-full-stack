@@ -1,0 +1,9 @@
+{
+    "Admin": "Administrator",
+    "Doctor": "Arzt",
+    "Logout": "Abmelden",
+    "home": {
+      "Title": "Startseite"
+    },
+    "Hello": "Hallo, {name}!"
+  }

@@ -1,0 +1,9 @@
+{
+    "Admin": "Admin",
+    "Doctor": "Doctor",
+    "Logout": "Logout",
+    "home": {
+      "Title": "Home"
+    },
+    "Hello": "Hello, {name}!"
+  }
