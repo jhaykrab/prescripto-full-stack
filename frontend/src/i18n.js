@@ -7,6 +7,7 @@ import fr from './translations/fr.json';
 import de from './translations/de.json';
 import zh from './translations/zh.json';
 import hi from './translations/hi.json';
+import tl from './translations/tl.json';
 
 i18n
   .use(LanguageDetector) 
@@ -19,6 +20,7 @@ i18n
       de: { translation: de },
       zh: { translation: zh },
       hi: { translation: hi },
+      tl: { translation: tl },
     },
     lng: 'en', 
     fallbackLng: 'en', 

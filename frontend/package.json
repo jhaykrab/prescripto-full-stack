@@ -17,7 +17,9 @@
     "react-dom": "^18.3.1",
     "react-i18next": "^15.4.1",
     "react-router-dom": "^6.24.1",
-    "react-toastify": "^10.0.5"
+    "react-toastify": "^10.0.5",
+    "react-toastify-tailwind": "^1.0.1",
+    "date-fns": "4.1.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

@@ -2,6 +2,13 @@
     "Admin": "Admin",
     "Doctor": "Doctor",
     "Logout": "Logout",
+    "Doctors": "Doctors",
+    "Appointments": "Appointments",
+    "Patients": "Patients",
+    "Latest Bookings": "Latest Bookings",
+    "Booking on": "Booking on",
+    "Cancelled": "Cancelled",
+    "Completed": "Completed",
     "home": {
       "Title": "Home"
     },

@@ -3,37 +3,18 @@ import axios from 'axios';
 import { useContext } from 'react';
 import { AdminContext } from '../../context/AdminContext';
 import { AppContext } from '../../context/AppContext';
-import { useTranslation } from 'react-google-multi-lang';
+import { useTranslation } from 'react-i18next'; 
 
 const AllAppointments = () => {
   const { aToken, appointments, getAllAppointments } = useContext(AdminContext);
   const { slotDateFormat, calculateAge, currency } = useContext(AppContext);
-  const { t } = useTranslation();
+  const { t } = useTranslation(); 
+
   const [remarks, setRemarks] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
   const appointmentsPerPage = 10;
   const [searchQuery, setSearchQuery] = useState('');
   const [sortCriteria, setSortCriteria] = useState('date');
-  const [translatedText, setTranslatedText] = useState({
-    appointments: t('Appointments'),
-    search: t('Search by patient, doctor, date, or time'),
-    sort_by: t('Sort by'),
-    date: t('Date'),
-    patient: t('Patient'),
-    doctor: t('Doctor'),
-    age: t('Age'),
-    date_time: t('Date & Time'),
-    fees: t('Fees'),
-    action: t('Action'),
-    status: t('Status'),
-    remarks: t('Remarks'),
-    confirm: t('Confirm'),
-    cancel: t('Cancel'),
-    completed: t('Completed'),
-    pending: t('Pending'),
-    cancelled: t('Cancelled'),
-    send: t('Send'),
-  });
 
   useEffect(() => {
     if (aToken) {
@@ -53,6 +34,7 @@ const AllAppointments = () => {
       const response = await axios.put(`/api/appointments/${id}`, {
         remarks: remarks[id],
       }, { headers: { Authorization: `Bearer ${aToken}` } });
+
       console.log(`Remark for appointment ${id}: ${remarks[id]}`);
       getAllAppointments(); // Refresh the appointments list
     } catch (error) {
@@ -65,6 +47,7 @@ const AllAppointments = () => {
       const response = await axios.put(`/api/appointments/${id}`, {
         action,
       }, { headers: { Authorization: `Bearer ${aToken}` } });
+
       console.log(`Status for appointment ${id} updated to ${action}`);
       getAllAppointments(); // Refresh the appointments list
     } catch (error) {
@@ -123,35 +106,35 @@ const AllAppointments = () => {
 
   return (
     <div className='w-full max-w-full m-5'>
-      <p className='mb-3 text-lg font-medium'>{translatedText.appointments}</p>
+      <p className='mb-3 text-lg font-medium'>{t('Appointments')}</p>
       <input
         type='text'
-        placeholder={translatedText.search}
+        placeholder={t('Search by patient, doctor, date, or time')}
         value={searchQuery}
         onChange={handleSearchChange}
         className='mb-4 p-2 border rounded w-full'
       />
       <div className='flex justify-between mb-4'>
         <div>
-          <label htmlFor='sortCriteria' className='mr-2'>{translatedText.sort_by}:</label>
+          <label htmlFor='sortCriteria' className='mr-2'>{t('Sort by')}:</label>
           <select id='sortCriteria' value={sortCriteria} onChange={handleSortChange} className='p-2 border rounded'>
-            <option value='date'>{translatedText.date}</option>
-            <option value='patient'>{translatedText.patient}</option>
-            <option value='doctor'>{translatedText.doctor}</option>
+            <option value='date'>{t('Date')}</option>
+            <option value='patient'>{t('Patient')}</option>
+            <option value='doctor'>{t('Doctor')}</option>
           </select>
         </div>
       </div>
       <div className='bg-white border rounded text-sm max-h-[80vh] overflow-y-scroll'>
         <div className='hidden sm:grid grid-cols-[0.5fr_2fr_1fr_2fr_2fr_1fr_1fr_1fr_2fr] grid-flow-col py-3 px-6 border-b'>
           <p className='text-center'>#</p>
-          <p className='text-center'>{translatedText.patient}</p>
-          <p className='text-center'>{translatedText.age}</p>
-          <p className='text-center'>{translatedText.date_time}</p>
-          <p className='text-center'>{translatedText.doctor}</p>
-          <p className='text-center'>{translatedText.fees}</p>
-          <p className='text-center'>{translatedText.action}</p>
-          <p className='text-center'>{translatedText.status}</p>
-          <p className='text-center'>{translatedText.remarks}</p>
+          <p className='text-center'>{t('Patient')}</p>
+          <p className='text-center'>{t('Age')}</p>
+          <p className='text-center'>{t('Date & Time')}</p>
+          <p className='text-center'>{t('Doctor')}</p>
+          <p className='text-center'>{t('Fees')}</p>
+          <p className='text-center'>{t('Action')}</p>
+          <p className='text-center'>{t('Status')}</p>
+          <p className='text-center'>{t('Remarks')}</p>
         </div>
         {currentAppointments.map((item, index) => (
           <div className='flex flex-wrap justify-between max-sm:gap-2 sm:grid sm:grid-cols-[0.5fr_2fr_1fr_2fr_2fr_1fr_1fr_1fr_2fr] items-center text-gray-500 py-3 px-6 border-b hover:bg-gray-50' key={index}>
@@ -166,11 +149,11 @@ const AllAppointments = () => {
             </div>
             <p className='text-center'>{currency}{item.amount}</p>
             <div className='flex flex-col gap-2 text-center'>
-              <button onClick={() => handleStatusChange(item._id, 'confirm')} className='text-green-500 border border-green-500 rounded px-2 py-1'>{translatedText.confirm}</button>
-              <button onClick={() => handleStatusChange(item._id, 'cancel')} className='text-red-500 border border-red-500 rounded px-2 py-1'>{translatedText.cancel}</button>
+              <button onClick={() => handleStatusChange(item._id, 'confirm')} className='text-green-500 border border-green-500 rounded px-2 py-1'>{t('Confirm')}</button>
+              <button onClick={() => handleStatusChange(item._id, 'cancel')} className='text-red-500 border border-red-500 rounded px-2 py-1'>{t('Cancel')}</button>
             </div>
             <p className='text-xs font-medium text-center'>
-              {item.cancelled ? translatedText.cancelled : item.isCompleted ? translatedText.completed : translatedText.pending}
+              {item.cancelled ? t('Cancelled') : item.isCompleted ? t('Completed') : t('Pending')}
             </p>
             <div className='flex flex-col items-center gap-2 text-center'>
               <textarea
@@ -178,7 +161,7 @@ const AllAppointments = () => {
                 onChange={(e) => handleRemarkChange(item._id, e.target.value)}
                 className='border rounded px-2 py-1 w-40 h-16'
               />
-              <button onClick={() => handleSendRemark(item._id)} className='text-blue-500 border border-blue-500 rounded px-2 py-1'>{translatedText.send}</button>
+              <button onClick={() => handleSendRemark(item._id)} className='text-blue-500 border border-blue-500 rounded px-2 py-1'>{t('Send')}</button>
             </div>
           </div>
         ))}
