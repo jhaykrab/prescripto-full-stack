@@ -54,7 +54,7 @@ const appointmentCancel = async (req, res) => {
 
         const appointmentData = await appointmentModel.findById(appointmentId)
         if (appointmentData && appointmentData.docId === docId) {
-            await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
+            await appointmentModel.findByIdAndUpdate(appointmentId, { status: 'Cancelled', cancelled: true })
             return res.json({ success: true, message: 'Appointment Cancelled' })
         }
 
@@ -66,6 +66,25 @@ const appointmentCancel = async (req, res) => {
     }
 
 }
+
+// API to confirm appointment for doctor panel
+const appointmentConfirm = async (req, res) => {
+    try {
+        const { docId, appointmentId } = req.body;
+        const appointmentData = await appointmentModel.findById(appointmentId);
+
+        if (appointmentData && appointmentData.docId === docId) {
+            await appointmentModel.findByIdAndUpdate(appointmentId, { status: 'Confirmed' });
+            return res.json({ success: true, message: 'Appointment Confirmed' });
+        }
+
+        res.json({ success: false, message: 'Appointment not found or unauthorized' });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
 
 // API to mark appointment completed for doctor panel
 const appointmentComplete = async (req, res) => {
@@ -87,6 +106,27 @@ const appointmentComplete = async (req, res) => {
     }
 
 }
+
+// API to delete appointment for doctor panel
+const appointmentDelete = async (req, res) => {
+    try {
+        const { id } = req.params; 
+        const appointmentData = await appointmentModel.findById(id);
+
+        if (!appointmentData) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+
+        await appointmentModel.findByIdAndDelete(id); // Delete the appointment
+        res.json({ success: true, message: 'Appointment Deleted' });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+
+
 
 // API to get all doctors list for Frontend
 const doctorList = async (req, res) => {
@@ -197,6 +237,8 @@ export {
     doctorList,
     changeAvailablity,
     appointmentComplete,
+    appointmentDelete,
+    appointmentConfirm,
     doctorDashboard,
     doctorProfile,
     updateDoctorProfile

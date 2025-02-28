@@ -8,6 +8,31 @@
     font-family: Outfit;
 }
 
+
+
+:root {
+    --color-primary: #2563eb;
+    --color-primary-dark: #1d4ed8;
+}
+
+.bg-primary {
+    background-color: var(--color-primary);
+}
+
+.bg-primary-dark {
+    background-color: var(--color-primary-dark);
+}
+
+.text-primary {
+    color: var(--color-primary);
+}
+
+.border-primary {
+    border-color: var(--color-primary);
+}
+
+
+
 .active hr {
     @apply block
 }

@@ -9,10 +9,15 @@ import stripe from "stripe";
 import razorpay from 'razorpay';
 
 // Import the email notification service
-import { sendEmailNotification } from '../services/emailService.js';
+import { 
+    sendEmailVerification, 
+    verifyEmailToken, 
+    sendEmailOTP,
+    verifyEmailOTP 
+} from '../services/emailService.js';
 
 // Import the SMS notification service
-import { sendSmsNotification } from '../services/smsService.js';
+import { sendOtp, verifyOtp as verifySmsOtp } from '../services/smsService.js';
 
 // Gateway Initialize
 const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY);
@@ -22,15 +27,94 @@ const razorpayInstance = new razorpay({
 });
 
 
+
+// API to send OTP
+const sendOtpHandler = async (req, res) => {
+    try {
+        const { target, method } = req.body;
+
+        if (!target || !method) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Target and method are required" 
+            });
+        }
+
+        if (method === 'phone') {
+            const internationalPhoneNumber = `${target.slice(1)}`;
+            await sendOtp(internationalPhoneNumber);
+        } else if (method === 'email') {
+            await sendEmailOTP(target);
+        } else {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid verification method"
+            });
+        }
+
+        res.json({ 
+            success: true, 
+            message: `OTP sent successfully to ${target}` 
+        });
+    } catch (error) {
+        console.error('Send OTP error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to send OTP' 
+        });
+    }
+};
+
+// API to verify OTP
+const verifyOtpHandler = async (req, res) => {
+    try {
+        const { target, otp, method } = req.body;
+
+        if (!target || !otp || !method) {
+            return res.status(400).json({
+                success: false,
+                message: "Target, OTP, and method are required"
+            });
+        }
+
+        let isValid = false;
+
+        if (method === 'phone') {
+            const internationalPhoneNumber = `${target.slice(1)}`;
+            isValid = await verifySmsOtp(internationalPhoneNumber, otp);
+        } else if (method === 'email') {
+            isValid = verifyEmailOTP(target, otp);
+        }
+
+        if (isValid) {
+            res.json({
+                success: true,
+                message: 'OTP verified successfully'
+            });
+        } else {
+            res.status(400).json({
+                success: false,
+                message: 'Invalid OTP'
+            });
+        }
+    } catch (error) {
+        console.error('Verify OTP error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to verify OTP'
+        });
+    }
+};
+
 // API to register user
 const registerUser = async (req, res) => {
     try {
-      const { name, email, password, phone } = req.body;
+        const { name, email, password, phone } = req.body;
   
-      // Check if user already exists
+        // Check if user already exists
         const existingUser = await userModel.findOne({ email });
         if (existingUser) {
-        return res.status(400).json({ success: false, message: "User already exists" });
+            return res.status(400).json({ success: false, message: "User already exists" });
         }
 
         // checking for all data to register user
@@ -43,8 +127,8 @@ const registerUser = async (req, res) => {
             return res.json({ success: false, message: "Please enter a valid email" })
         }
 
-       // Validate phone number
-       if (!validator.isMobilePhone(phone, 'en-PH')) {
+        // Validate phone number
+        if (!validator.isMobilePhone(phone, 'en-PH')) {
             return res.status(400).json({ success: false, message: "Please enter a valid phone number" });
         }
 
@@ -54,7 +138,7 @@ const registerUser = async (req, res) => {
         }
 
         // hashing user password
-        const salt = await bcrypt.genSalt(10); // the more no. round the more time it will take
+        const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt)
 
         const userData = {
@@ -62,6 +146,7 @@ const registerUser = async (req, res) => {
             email,
             phone,
             password: hashedPassword,
+            emailVerified: false,
         }
 
         // Create new user
@@ -70,23 +155,22 @@ const registerUser = async (req, res) => {
         const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET)
 
         // Send email notification
-await sendEmailNotification(email, '', { name }, 'welcome');
+        const verificationResult = await sendEmailVerification(email);
 
         // Send SMS notification
         const internationalPhoneNumber = `${phone.slice(1)}`; 
-        await sendSmsNotification(internationalPhoneNumber, `Welcome, ${name}! Your account is set up. Log in at our site to explore features. Enjoy your journey!`);
+        await sendOtp(internationalPhoneNumber);
 
         // Send response
-    res.status(201).json({ success: true, token });
-} catch (error) {
-  console.error(error);
-  res.status(500).json({ success: false, message: "Server error" });
-}
+        res.status(201).json({ success: true, token });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
 }
 
 // API to login user
 const loginUser = async (req, res) => {
-
     try {
         const { email, password } = req.body;
         const user = await userModel.findOne({ email })
@@ -112,7 +196,6 @@ const loginUser = async (req, res) => {
 
 // API to get user profile data
 const getProfile = async (req, res) => {
-
     try {
         const { userId } = req.body
         const userData = await userModel.findById(userId).select('-password')
@@ -125,11 +208,52 @@ const getProfile = async (req, res) => {
     }
 }
 
+
+
+// Keep only one version of the verifyOtp function
+const verifyOtp = async (req, res) => {
+    try {
+        const { target, otp, method } = req.body;
+
+        if (!target || !otp || !method) {
+            return res.status(400).json({
+                success: false,
+                message: "Target, OTP, and method are required"
+            });
+        }
+
+        let isValid = false;
+
+        if (method === 'phone') {
+            const internationalPhoneNumber = `${target.slice(1)}`;
+            isValid = await verifySmsOtp(internationalPhoneNumber, otp);
+        } else if (method === 'email') {
+            isValid = verifyEmailOTP(target, otp);
+        }
+
+        if (isValid) {
+            res.json({
+                success: true,
+                message: 'OTP verified successfully'
+            });
+        } else {
+            res.status(400).json({
+                success: false,
+                message: 'Invalid OTP'
+            });
+        }
+    } catch (error) {
+        console.error('Verify OTP error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to verify OTP'
+        });
+    }
+};
+
 // API to update user profile
 const updateProfile = async (req, res) => {
-
     try {
-
         const { userId, name, phone, address, dob, gender } = req.body
         const imageFile = req.file
 
@@ -140,7 +264,6 @@ const updateProfile = async (req, res) => {
         await userModel.findByIdAndUpdate(userId, { name, phone, address: JSON.parse(address), dob, gender })
 
         if (imageFile) {
-
             // upload image to cloudinary
             const imageUpload = await cloudinary.uploader.upload(imageFile.path, { resource_type: "image" })
             const imageURL = imageUpload.secure_url
@@ -158,10 +281,13 @@ const updateProfile = async (req, res) => {
 
 // API to book appointment 
 const bookAppointment = async (req, res) => {
-
     try {
+        const { userId, docId, slotDate, slotTime, concern } = req.body;
 
-        const { userId, docId, slotDate, slotTime } = req.body;
+        if (!userId || !docId || !slotDate || !slotTime || !concern) {
+            return res.status(400).json({ success: false, message: "Missing required fields" });
+        }
+
         const docData = await doctorModel.findById(docId).select("-password");
 
         if (!slotTime) {
@@ -199,6 +325,7 @@ const bookAppointment = async (req, res) => {
             amount: docData.fees,
             slotTime,
             slotDate,
+            concern,
             date: Date.now()
         }
 
@@ -208,22 +335,50 @@ const bookAppointment = async (req, res) => {
         // save new slots data in docData
         await doctorModel.findByIdAndUpdate(docId, { slots_booked })
 
-        // Send email notification
-await sendEmailNotification(userData.email, '', { patientName: userData.name, doctorName: docData.name, date: slotDate, time: slotTime, location: docData.address.line1 }, 'appointment');
-
-        res.json({ success: true, message: 'Appointment Booked' })
+        res.json({ success: true, message: 'Appointment booked successfully' })
 
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
     }
-
 }
+
+// New handler for email verification
+const handleEmailVerification = async (req, res) => {
+    try {
+        const { token } = req.body;
+
+        const result = await verifyEmailToken(token);
+        
+        if (result.success) {
+            // Update user's email verification status
+            await userModel.findOneAndUpdate(
+                { email: result.email },
+                { emailVerified: true }
+            );
+
+            res.json({ 
+                success: true, 
+                message: "Email verified successfully" 
+            });
+        } else {
+            res.status(400).json({ 
+                success: false, 
+                message: "Invalid verification token" 
+            });
+        }
+    } catch (error) {
+        console.error('Email verification error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: "Failed to verify email" 
+        });
+    }
+};
 
 // API to cancel appointment
 const cancelAppointment = async (req, res) => {
     try {
-
         const { userId, appointmentId } = req.body
         const appointmentData = await appointmentModel.findById(appointmentId)
 
@@ -256,7 +411,6 @@ const cancelAppointment = async (req, res) => {
 // API to get user appointments for frontend my-appointments page
 const listAppointment = async (req, res) => {
     try {
-
         const { userId } = req.body
         const appointments = await appointmentModel.find({ userId })
 
@@ -271,7 +425,6 @@ const listAppointment = async (req, res) => {
 // API to make payment of appointment using razorpay
 const paymentRazorpay = async (req, res) => {
     try {
-
         const { appointmentId } = req.body
         const appointmentData = await appointmentModel.findById(appointmentId)
 
@@ -319,7 +472,6 @@ const verifyRazorpay = async (req, res) => {
 // API to make payment of appointment using Stripe
 const paymentStripe = async (req, res) => {
     try {
-
         const { appointmentId } = req.body
         const { origin } = req.headers
 
@@ -359,7 +511,6 @@ const paymentStripe = async (req, res) => {
 
 const verifyStripe = async (req, res) => {
     try {
-
         const { appointmentId, success } = req.body
 
         if (success === "true") {
@@ -373,7 +524,6 @@ const verifyStripe = async (req, res) => {
         console.log(error)
         res.json({ success: false, message: error.message })
     }
-
 }
 
 export {
@@ -387,5 +537,9 @@ export {
     paymentRazorpay,
     verifyRazorpay,
     paymentStripe,
-    verifyStripe
+    verifyStripe,
+    sendOtpHandler as sendOtp,     
+    verifyOtpHandler as verifyOtp, 
+    handleEmailVerification
 }
+

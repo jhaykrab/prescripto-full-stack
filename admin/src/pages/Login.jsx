@@ -5,7 +5,7 @@ import { AdminContext } from '../context/AdminContext';
 import { toast } from 'react-toastify';
 import { useTranslation } from 'react-i18next';
 import MiniLanguageSwitcher from '../components/MiniLanguageSwitcher'; 
-import { useNavigate } from 'react-router-dom'; // Import useNavigate
+import { useNavigate } from 'react-router-dom'; 
 
 const Login = () => {
     const { t } = useTranslation();
@@ -15,7 +15,7 @@ const Login = () => {
     const backendUrl = import.meta.env.VITE_BACKEND_URL;
     const { setDToken } = useContext(DoctorContext);
     const { setAToken } = useContext(AdminContext);
-    const navigate = useNavigate(); // Initialize useNavigate
+    const navigate = useNavigate(); 
 
     const onSubmitHandler = async (event) => {
         event.preventDefault();
@@ -25,7 +25,7 @@ const Login = () => {
             if (data.success) {
                 setAToken(data.token);
                 localStorage.setItem('aToken', data.token);
-                window.location.href = '/admin-dashboard'; // Redirect to admin dashboard
+                window.location.href = '/admin-dashboard'; 
             } else {
                 toast.error(data.message);
             }
@@ -34,7 +34,7 @@ const Login = () => {
             if (data.success) {
                 setDToken(data.token);
                 localStorage.setItem('dToken', data.token);
-                window.location.href = '/doctor-dashboard'; // Redirect to doctor dashboard
+                window.location.href = '/doctor-dashboard'; 
             } else {
                 toast.error(data.message);
             }

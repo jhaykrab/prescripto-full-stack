@@ -76,6 +76,25 @@ const appointmentCancel = async (req, res) => {
       res.json({ success: false, message: error.message });
     }
   };
+
+  // API for deleting an appointment
+  const deleteAppointment = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const appointment = await appointmentModel.findById(id);
+        if (!appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+        await appointmentModel.findByIdAndDelete(id); // Delete the appointment
+        res.json({ success: true, message: 'Appointment deleted successfully' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+
+
   
   // API for appointment confirmation
   const appointmentConfirm = async (req, res) => {
@@ -212,5 +231,6 @@ export {
     addDoctor,
     allDoctors,
     adminDashboard,
+    deleteAppointment,
 };
 

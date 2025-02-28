@@ -69,6 +69,47 @@ const DoctorContextProvider = (props) => {
 
     }
 
+    // Function to delete appointment using API
+    const deleteAppointment = async (appointmentId) => {
+        try {
+            const { data } = await axios.delete(`${backendUrl}/api/doctor/delete-appointment/${appointmentId}`, { headers: { dToken } });
+            if (data.success) {
+                toast.success(data.message);
+                getAppointments(); 
+                getDashData(); 
+            } else {
+                toast.error(data.message);
+            }
+        } catch (error) {
+            toast.error(error.message);
+            console.log(error);
+        }
+    };
+
+
+    //Function to confirm  doctor appointment using API
+    const confirmAppointment = async (appointmentId) => {
+
+        try {
+
+            const { data } = await axios.post(backendUrl + '/api/doctor/confirm-appointment', { appointmentId }, { headers: { dToken } })
+
+            if (data.success) {
+                toast.success(data.message)
+                getAppointments()
+                // after creating dashboard
+                getDashData()
+            } else {
+                toast.error(data.message)
+            }
+
+        } catch (error) {
+            toast.error(error.message)
+            console.log(error)
+        }
+
+    }
+
     // Function to Mark appointment completed using API
     const completeAppointment = async (appointmentId) => {
 
@@ -116,7 +157,9 @@ const DoctorContextProvider = (props) => {
         appointments,
         getAppointments,
         cancelAppointment,
+        confirmAppointment,
         completeAppointment,
+        deleteAppointment,
         dashData, getDashData,
         profileData, setProfileData,
         getProfileData,

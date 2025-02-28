@@ -1,17 +1,30 @@
-// backend/services/smsService.js
-import twilio from 'twilio';
+import { auth } from '../config/firebase.js';
 
-const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+// Renamed from sendSmsOtp to sendOtp to match the import
+export const sendOtp = async (phoneNumber) => {
+    try {
+        const verificationId = await auth.signInWithPhoneNumber(phoneNumber);
+        return {
+            success: true,
+            verificationId
+        };
+    } catch (error) {
+        console.error('Error sending SMS verification code:', error);
+        throw error;
+    }
+};
 
-export const sendSmsNotification = async (to, message) => {
-  try {
-    const response = await client.messages.create({
-      body: message,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: to
-    });
-    console.log('SMS sent:', response.sid);
-  } catch (error) {
-    console.error('Error sending SMS:', error);
-  }
+// Renamed from verifySmsOtp to verifyOtp to match the import
+export const verifyOtp = async (verificationId, otpCode) => {
+    try {
+        const credential = auth.PhoneAuthProvider.credential(verificationId, otpCode);
+        const result = await auth.signInWithCredential(credential);
+        return {
+            success: true,
+            user: result.user
+        };
+    } catch (error) {
+        console.error('Error verifying SMS code:', error);
+        throw error;
+    }
 };
