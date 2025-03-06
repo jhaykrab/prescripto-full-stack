@@ -16,28 +16,44 @@ const VerificationModal = ({
     const { t } = useTranslation();
     const { backendUrl } = useContext(AppContext);
     const [otp, setOtp] = useState(['', '', '', '', '', '']);
-    const [timer, setTimer] = useState(60);
+    const [timer, setTimer] = useState(300); // Changed to 300 seconds (5 minutes)
     const [loading, setLoading] = useState(false);
     const [originalTarget, setOriginalTarget] = useState(null);
 
-    const resetStates = () => {
-        setOtp(['', '', '', '', '', '']);
-        setTimer(60);
-        setOtpTimeout(false);
-    };
-
+    // Reset states when modal opens
     useEffect(() => {
         if (isOpen) {
-            resetStates();
-            setOriginalTarget(target?.trim());
-            if (target) {
-                handleSendOtp();
-            }
-        } else {
-            resetStates();
-            setOriginalTarget(null);
+            setOtp(['', '', '', '', '', '']);
+            setTimer(300);
+            setOtpTimeout(false);
+            setOriginalTarget(target); // Set the original target when modal opens
         }
-    }, [isOpen]);
+    }, [isOpen, setOtpTimeout, target]);
+
+    // Timer logic
+    useEffect(() => {
+        let interval;
+        if (isOpen && timer > 0 && !otpTimeout) {
+            interval = setInterval(() => {
+                setTimer((prev) => {
+                    if (prev <= 1) {
+                        setOtpTimeout(true);
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        }
+        return () => clearInterval(interval);
+    }, [isOpen, timer, otpTimeout, setOtpTimeout]);
+
+    const handleResendOtp = async () => {
+        setOtp(['', '', '', '', '', '']);
+        setTimer(300);
+        setOtpTimeout(false);
+        setOriginalTarget(target);
+        await handleSendOtp();
+    };
 
     const handleOtpInput = (element, index) => {
         if (isNaN(element.value)) return;
@@ -71,7 +87,7 @@ const VerificationModal = ({
 
     const handleSendOtp = async () => {
         if (!target) {
-            toast.error(t('Email address is required'));
+            toast.error(t('Target is required'));
             return;
         }
 
@@ -79,17 +95,18 @@ const VerificationModal = ({
         setLoading(true);
         
         try {
+            // Updated API endpoint and payload for TextLink
             const response = await axios.post(`${backendUrl}/api/user/send-otp`, {
                 target: trimmedTarget,
-                method: verificationMethod
-            }, {
-                headers: { 'Content-Type': 'application/json' }
+                method: verificationMethod,
+                // Add any additional TextLink-specific parameters here
+                channel: verificationMethod === 'phone' ? 'sms' : 'email'
             });
 
             if (response.data.success) {
                 setOriginalTarget(trimmedTarget);
-                toast.success(t('OTP sent successfully'));
                 resetStates();
+                toast.success(t('Verification code sent successfully'));
             } else {
                 throw new Error(response.data.message || 'Failed to send OTP');
             }
@@ -106,68 +123,38 @@ const VerificationModal = ({
     const verifyOtp = async () => {
         const otpString = otp.join('');
         
-        if (!originalTarget) {
-            toast.error(t('Please request a new OTP'));
+        if (!target) {
+            toast.error('Please request a new OTP');
             return;
         }
 
         if (otpString.length !== 6) {
-            toast.error(t('Please enter complete OTP'));
+            toast.error('Please enter complete OTP');
             return;
         }
 
         setLoading(true);
 
         try {
-            const response = await axios.post(`${backendUrl}/api/user/verify-otp`, {
-                target: originalTarget,
-                method: verificationMethod,
+            const response = await axios.post(`${backendUrl}/api/sms/verify-otp`, {
+                target: target,
+                method: 'phone',
                 otp: otpString
-            }, {
-                headers: { 'Content-Type': 'application/json' }
             });
 
             if (response.data.success) {
-                toast.success(t('OTP verified successfully'));
+                toast.success('OTP verified successfully');
                 onVerificationSuccess();
                 onClose();
-            } else {
-                throw new Error(response.data.message || 'Verification failed');
             }
         } catch (error) {
-            const errorMessage = error.response?.data?.message || t('Verification failed');
-            toast.error(errorMessage);
+            console.error('Verification Error:', error.response?.data || error);
+            toast.error(error.response?.data?.message || 'Verification failed');
             setOtp(['', '', '', '', '', '']);
-            
-            const firstInput = document.querySelector('.otp-input');
-            if (firstInput) firstInput.focus();
         } finally {
             setLoading(false);
         }
     };
-
-    useEffect(() => {
-        let timerInterval;
-
-        if (isOpen && !otpTimeout) {
-            setTimer(60);
-            
-            timerInterval = setInterval(() => {
-                setTimer((prevTimer) => {
-                    if (prevTimer <= 1) {
-                        clearInterval(timerInterval);
-                        setOtpTimeout(true);
-                        return 0;
-                    }
-                    return prevTimer - 1;
-                });
-            }, 1000);
-        }
-
-        return () => {
-            if (timerInterval) clearInterval(timerInterval);
-        };
-    }, [isOpen, otpTimeout]);
 
     if (!isOpen) return null;
 

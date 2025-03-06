@@ -1,95 +1,93 @@
-import { useState, useEffect } from 'react';
-import { auth } from '../config/firebase';
-import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
+import { useState } from 'react';
+import axios from 'axios';
+import { toast } from 'react-toastify';
 
 const PhoneAuth = () => {
     const [phoneNumber, setPhoneNumber] = useState('');
-    const [verificationId, setVerificationId] = useState('');
-    const [otp, setOtp] = useState('');
-    const [step, setStep] = useState('PHONE'); // PHONE or OTP
+    const [verificationCode, setVerificationCode] = useState('');
+    const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
-        // Initialize reCAPTCHA when component mounts
-        if (!window.recaptchaVerifier) {
-            window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-                'size': 'normal',
-                'callback': (response) => {
-                    // reCAPTCHA solved, allow signInWithPhoneNumber.
-                    console.log('reCAPTCHA solved');
-                },
-                'expired-callback': () => {
-                    // Response expired. Ask user to solve reCAPTCHA again.
-                    console.log('reCAPTCHA expired');
-                }
-            });
-        }
-    }, []);
-
-    const handleSendOTP = async (e) => {
+    const handleSendCode = async (e) => {
         e.preventDefault();
+        setLoading(true);
+
         try {
-            const formattedPhone = phoneNumber; // Ensure phone number is in E.164 format
-            const appVerifier = window.recaptchaVerifier;
-            
-            const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
-            setVerificationId(confirmationResult.verificationId);
-            setStep('OTP');
-            
-        } catch (error) {
-            console.error('Error sending OTP:', error);
-            // Reset reCAPTCHA
-            window.recaptchaVerifier.render().then(widgetId => {
-                window.recaptchaVerifier.reset(widgetId);
+            // Format phone number to E.164
+            let formattedPhone = phoneNumber;
+            if (!formattedPhone.startsWith('+')) {
+                formattedPhone = `+${formattedPhone}`;
+            }
+
+            const response = await axios.post('/api/user/send-otp', {
+                target: formattedPhone,
+                method: 'phone'
             });
+
+            if (response.data.success) {
+                toast.success('Verification code sent!');
+            } else {
+                throw new Error(response.data.message);
+            }
+        } catch (error) {
+            console.error('Error sending code:', error);
+            toast.error(error.message || 'Failed to send verification code');
+        } finally {
+            setLoading(false);
         }
     };
 
-    const handleVerifyOTP = async (e) => {
+    const handleVerifyCode = async (e) => {
         e.preventDefault();
+        setLoading(true);
+
         try {
-            const response = await fetch('/api/verify-otp', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    verificationId,
-                    otp
-                }),
+            const response = await axios.post('/api/user/verify-otp', {
+                target: phoneNumber,
+                otp: verificationCode,
+                method: 'phone'
             });
-            
-            if (response.ok) {
-                console.log('Phone number verified successfully');
-                // Handle successful verification (e.g., redirect or update UI)
+
+            if (response.data.success) {
+                toast.success('Successfully verified!');
+                // Handle successful verification here
+            } else {
+                throw new Error(response.data.message);
             }
         } catch (error) {
-            console.error('Error verifying OTP:', error);
+            console.error('Error verifying code:', error);
+            toast.error('Invalid verification code');
+        } finally {
+            setLoading(false);
         }
     };
 
     return (
-        <div>
-            {step === 'PHONE' ? (
-                <form onSubmit={handleSendOTP}>
+        <div className="phone-auth-container">
+            {!confirmationResult ? (
+                <form onSubmit={handleSendCode}>
                     <input
                         type="tel"
                         value={phoneNumber}
                         onChange={(e) => setPhoneNumber(e.target.value)}
-                        placeholder="Enter phone number"
+                        placeholder="Enter phone number (+1234567890)"
+                        required
                     />
-                    {/* reCAPTCHA will be rendered here */}
-                    <div id="recaptcha-container"></div>
-                    <button type="submit">Send OTP</button>
+                    <button type="submit" disabled={loading}>
+                        {loading ? 'Sending...' : 'Send Code'}
+                    </button>
                 </form>
             ) : (
-                <form onSubmit={handleVerifyOTP}>
+                <form onSubmit={handleVerifyCode}>
                     <input
                         type="text"
-                        value={otp}
-                        onChange={(e) => setOtp(e.target.value)}
-                        placeholder="Enter OTP"
+                        value={verificationCode}
+                        onChange={(e) => setVerificationCode(e.target.value)}
+                        placeholder="Enter verification code"
+                        required
                     />
-                    <button type="submit">Verify OTP</button>
+                    <button type="submit" disabled={loading}>
+                        {loading ? 'Verifying...' : 'Verify Code'}
+                    </button>
                 </form>
             )}
         </div>

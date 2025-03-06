@@ -26,7 +26,8 @@ const razorpayInstance = new razorpay({
     key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-
+// In-memory OTP store (consider using Redis or similar in production)
+const otpStore = new Map();
 
 // API to send OTP
 const sendOtpHandler = async (req, res) => {
@@ -41,8 +42,11 @@ const sendOtpHandler = async (req, res) => {
         }
 
         if (method === 'phone') {
-            const internationalPhoneNumber = `${target.slice(1)}`;
-            await sendOtp(internationalPhoneNumber);
+            const result = await sendOtp(target);
+            otpStore.set(target, {
+                otp: result.otp,
+                expiresAt: Date.now() + 5 * 60 * 1000 // 5 minutes
+            });
         } else if (method === 'email') {
             await sendEmailOTP(target);
         } else {
@@ -65,7 +69,30 @@ const sendOtpHandler = async (req, res) => {
     }
 };
 
-// API to verify OTP
+// Consolidate duplicate OTP verification logic into a single function
+const verifyOtpInternal = async (target, otp, method) => {
+    try {
+        if (method === 'phone') {
+            // Format the number consistently
+            let formattedNumber = target.replace(/[^\d]/g, '');
+            if (formattedNumber.startsWith('0')) {
+                formattedNumber = '63' + formattedNumber.substring(1);
+            } else if (!formattedNumber.startsWith('63')) {
+                formattedNumber = '63' + formattedNumber;
+            }
+            
+            return await verifyOtp(formattedNumber, otp);
+        } else if (method === 'email') {
+            return verifyEmailOTP(target, otp);
+        }
+        return false;
+    } catch (error) {
+        console.error('Internal OTP verification error:', error);
+        throw error;
+    }
+};
+
+// Unified OTP verification handler
 const verifyOtpHandler = async (req, res) => {
     try {
         const { target, otp, method } = req.body;
@@ -77,31 +104,44 @@ const verifyOtpHandler = async (req, res) => {
             });
         }
 
-        let isValid = false;
-
+        // Format the phone number consistently for lookup
+        let lookupTarget = target;
         if (method === 'phone') {
-            const internationalPhoneNumber = `${target.slice(1)}`;
-            isValid = await verifySmsOtp(internationalPhoneNumber, otp);
-        } else if (method === 'email') {
-            isValid = verifyEmailOTP(target, otp);
+            // Remove any non-digit characters
+            lookupTarget = target.replace(/[^\d]/g, '');
+            // Ensure it starts with '63'
+            if (lookupTarget.startsWith('0')) {
+                lookupTarget = '63' + lookupTarget.substring(1);
+            } else if (!lookupTarget.startsWith('63')) {
+                lookupTarget = '63' + lookupTarget;
+            }
         }
 
+        console.log('Verification attempt:', {
+            originalTarget: target,
+            lookupTarget,
+            method,
+            timestamp: new Date().toISOString()
+        });
+
+        const isValid = await verifyOtpInternal(lookupTarget, otp, method);
+
         if (isValid) {
-            res.json({
+            return res.json({
                 success: true,
                 message: 'OTP verified successfully'
             });
-        } else {
-            res.status(400).json({
-                success: false,
-                message: 'Invalid OTP'
-            });
         }
+
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid OTP'
+        });
     } catch (error) {
         console.error('Verify OTP error:', error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
-            message: 'Failed to verify OTP'
+            message: error.message || 'Failed to verify OTP'
         });
     }
 };
@@ -109,63 +149,61 @@ const verifyOtpHandler = async (req, res) => {
 // API to register user
 const registerUser = async (req, res) => {
     try {
-        const { name, email, password, phone } = req.body;
-  
+        const userData = req.body;
+        const { email, phone } = userData;
+
         // Check if user already exists
-        const existingUser = await userModel.findOne({ email });
+        const existingUser = await userModel.findOne({ 
+            $or: [
+                { email: email },
+                { phone: phone }
+            ]
+        });
+
         if (existingUser) {
-            return res.status(400).json({ success: false, message: "User already exists" });
-        }
-
-        // checking for all data to register user
-        if (!name || !email || !password || !phone) {
-            return res.json({ success: false, message: 'Missing Details' })
-        }
-
-        // validating email format
-        if (!validator.isEmail(email)) {
-            return res.json({ success: false, message: "Please enter a valid email" })
-        }
-
-        // Validate phone number
-        if (!validator.isMobilePhone(phone, 'en-PH')) {
-            return res.status(400).json({ success: false, message: "Please enter a valid phone number" });
-        }
-
-        // validating strong password
-        if (password.length < 8) {
-            return res.json({ success: false, message: "Please enter a strong password" })
-        }
-
-        // hashing user password
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt)
-
-        const userData = {
-            name,
-            email,
-            phone,
-            password: hashedPassword,
-            emailVerified: false,
+            return res.status(400).json({ 
+                success: false, 
+                message: existingUser.email === email 
+                    ? "Email already registered" 
+                    : "Phone number already registered" 
+            });
         }
 
         // Create new user
         const newUser = new userModel(userData);
         await newUser.save();
-        const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET)
 
-        // Send email notification
-        const verificationResult = await sendEmailVerification(email);
+        // Generate JWT token
+        const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET);
 
-        // Send SMS notification
-        const internationalPhoneNumber = `${phone.slice(1)}`; 
-        await sendOtp(internationalPhoneNumber);
+        try {
+            // Send email verification
+            await sendEmailVerification(email);
+        } catch (emailError) {
+            console.error('Email verification failed:', emailError);
+        }
 
-        // Send response
-        res.status(201).json({ success: true, token });
+        try {
+            // Send SMS verification
+            const internationalPhoneNumber = phone.startsWith('+') ? phone.slice(1) : phone;
+            await sendOtp(internationalPhoneNumber);
+        } catch (smsError) {
+            console.error('SMS verification failed:', smsError);
+        }
+
+        res.status(201).json({ 
+            success: true, 
+            token,
+            message: "Registration successful"
+        });
+
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: "Server error" });
+        console.error('Registration error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: error.message || "Server error",
+            error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 }
 
@@ -173,190 +211,383 @@ const registerUser = async (req, res) => {
 const loginUser = async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await userModel.findOne({ email })
+        const user = await userModel.findOne({ email });
 
         if (!user) {
-            return res.json({ success: false, message: "User does not exist" })
+            return res.status(404).json({ success: false, message: "User does not exist" });
         }
 
-        const isMatch = await bcrypt.compare(password, user.password)
+        const isMatch = await bcrypt.compare(password, user.password);
 
         if (isMatch) {
-            const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET)
-            res.json({ success: true, token })
-        }
-        else {
-            res.json({ success: false, message: "Invalid credentials" })
+            const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+            res.json({ success: true, token });
+        } else {
+            res.status(401).json({ success: false, message: "Invalid credentials" });
         }
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message });
     }
 }
 
 // API to get user profile data
 const getProfile = async (req, res) => {
     try {
-        const { userId } = req.body
-        const userData = await userModel.findById(userId).select('-password')
+        const { userId } = req.body;
+        const userData = await userModel.findById(userId).select('-password');
 
-        res.json({ success: true, userData })
+        if (!userData) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
 
+        res.json({ success: true, userData });
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message });
     }
 }
-
-
-
-// Keep only one version of the verifyOtp function
-const verifyOtp = async (req, res) => {
-    try {
-        const { target, otp, method } = req.body;
-
-        if (!target || !otp || !method) {
-            return res.status(400).json({
-                success: false,
-                message: "Target, OTP, and method are required"
-            });
-        }
-
-        let isValid = false;
-
-        if (method === 'phone') {
-            const internationalPhoneNumber = `${target.slice(1)}`;
-            isValid = await verifySmsOtp(internationalPhoneNumber, otp);
-        } else if (method === 'email') {
-            isValid = verifyEmailOTP(target, otp);
-        }
-
-        if (isValid) {
-            res.json({
-                success: true,
-                message: 'OTP verified successfully'
-            });
-        } else {
-            res.status(400).json({
-                success: false,
-                message: 'Invalid OTP'
-            });
-        }
-    } catch (error) {
-        console.error('Verify OTP error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to verify OTP'
-        });
-    }
-};
 
 // API to update user profile
 const updateProfile = async (req, res) => {
     try {
-        const { userId, name, phone, address, dob, gender } = req.body
-        const imageFile = req.file
+        const { userId, name, phone, address, dob, gender } = req.body;
+        const imageFile = req.file;
 
         if (!name || !phone || !dob || !gender) {
-            return res.json({ success: false, message: "Data Missing" })
+            return res.status(400).json({ success: false, message: "Required fields missing" });
         }
 
-        await userModel.findByIdAndUpdate(userId, { name, phone, address: JSON.parse(address), dob, gender })
+        const updateData = { 
+            name, 
+            phone, 
+            address: JSON.parse(address), 
+            dob, 
+            gender 
+        };
 
         if (imageFile) {
-            // upload image to cloudinary
-            const imageUpload = await cloudinary.uploader.upload(imageFile.path, { resource_type: "image" })
-            const imageURL = imageUpload.secure_url
-
-            await userModel.findByIdAndUpdate(userId, { image: imageURL })
+            const imageUpload = await cloudinary.uploader.upload(imageFile.path, { 
+                resource_type: "image" 
+            });
+            updateData.image = imageUpload.secure_url;
         }
 
-        res.json({ success: true, message: 'Profile Updated' })
+        await userModel.findByIdAndUpdate(userId, updateData);
 
+        res.json({ success: true, message: 'Profile Updated' });
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message });
     }
 }
 
-// API to book appointment 
+// Improved bookAppointment with better validation and error handling
 const bookAppointment = async (req, res) => {
     try {
         const { userId, docId, slotDate, slotTime, concern } = req.body;
 
+        // Validate required fields
         if (!userId || !docId || !slotDate || !slotTime || !concern) {
-            return res.status(400).json({ success: false, message: "Missing required fields" });
+            return res.status(400).json({ 
+                success: false, 
+                message: "Missing required fields" 
+            });
         }
 
+        // Get doctor data with error handling
         const docData = await doctorModel.findById(docId).select("-password");
-
-        if (!slotTime) {
-            return res.json({ success: false, message: 'Slot time is required' });
+        if (!docData) {
+            return res.status(404).json({
+                success: false,
+                message: "Doctor not found"
+            });
         }
 
+        // Check doctor availability
         if (!docData.available) {
-            return res.json({ success: false, message: 'Doctor Not Available' })
+            return res.status(400).json({
+                success: false,
+                message: "Doctor not available"
+            });
         }
 
-        let slots_booked = docData.slots_booked
-
-        // checking for slot availablity 
-        if (slots_booked[slotDate]) {
-            if (slots_booked[slotDate].includes(slotTime)) {
-                return res.json({ success: false, message: 'Slot Not Available' })
-            }
-            else {
-                slots_booked[slotDate].push(slotTime)
-            }
-        } else {
-            slots_booked[slotDate] = []
-            slots_booked[slotDate].push(slotTime)
+        // Check slot availability
+        const slots_booked = docData.slots_booked || {};
+        if (slots_booked[slotDate]?.includes(slotTime)) {
+            return res.status(400).json({
+                success: false,
+                message: "Slot not available"
+            });
         }
 
-        const userData = await userModel.findById(userId).select("-password")
+        // Update slots
+        if (!slots_booked[slotDate]) {
+            slots_booked[slotDate] = [];
+        }
+        slots_booked[slotDate].push(slotTime);
 
-        delete docData.slots_booked
+        // Get user data
+        const userData = await userModel.findById(userId).select("-password");
+        if (!userData) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
 
+        // Create appointment
         const appointmentData = {
             userId,
             docId,
             userData,
-            docData,
+            docData: {
+                ...docData.toObject(),
+                slots_booked: undefined
+            },
             amount: docData.fees,
             slotTime,
             slotDate,
             concern,
             date: Date.now()
-        }
+        };
 
-        const newAppointment = new appointmentModel(appointmentData)
-        await newAppointment.save()
+        // Save appointment and update doctor slots atomically
+        const session = await appointmentModel.startSession();
+        await session.withTransaction(async () => {
+            const newAppointment = new appointmentModel(appointmentData);
+            await newAppointment.save({ session });
+            await doctorModel.findByIdAndUpdate(docId, { slots_booked }, { session });
+        });
+        await session.endSession();
 
-        // save new slots data in docData
-        await doctorModel.findByIdAndUpdate(docId, { slots_booked })
-
-        res.json({ success: true, message: 'Appointment booked successfully' })
+        return res.json({
+            success: true,
+            message: "Appointment booked successfully"
+        });
 
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.error('Book appointment error:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Failed to book appointment"
+        });
     }
 }
 
-// New handler for email verification
+// API to cancel appointment
+const cancelAppointment = async (req, res) => {
+    try {
+        const { userId, appointmentId } = req.body;
+        const appointmentData = await appointmentModel.findById(appointmentId);
+
+        if (!appointmentData) {
+            return res.status(404).json({ 
+                success: false, 
+                message: "Appointment not found" 
+            });
+        }
+
+        if (appointmentData.userId !== userId) {
+            return res.status(403).json({ 
+                success: false, 
+                message: "Unauthorized action" 
+            });
+        }
+
+        await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true });
+
+        // Release doctor's slot
+        const { docId, slotDate, slotTime } = appointmentData;
+        const doctorData = await doctorModel.findById(docId);
+        
+        if (doctorData) {
+            let slots_booked = doctorData.slots_booked;
+            if (slots_booked[slotDate]) {
+                slots_booked[slotDate] = slots_booked[slotDate].filter(t => t !== slotTime);
+                await doctorModel.findByIdAndUpdate(docId, { slots_booked });
+            }
+        }
+
+        res.json({ success: true, message: "Appointment cancelled" });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+}
+
+// API to list user appointments
+const listAppointment = async (req, res) => {
+    try {
+        const { userId } = req.body;
+        const appointments = await appointmentModel.find({ userId });
+
+        res.json({ success: true, appointments });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+}
+
+// API for Razorpay payment
+const paymentRazorpay = async (req, res) => {
+    try {
+        const { appointmentId } = req.body;
+        const appointmentData = await appointmentModel.findById(appointmentId);
+
+        if (!appointmentData || appointmentData.cancelled) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Appointment cancelled or not found" 
+            });
+        }
+
+        const options = {
+            amount: appointmentData.amount * 100,
+            currency: process.env.CURRENCY,
+            receipt: appointmentId,
+        };
+
+        const order = await razorpayInstance.orders.create(options);
+        res.json({ success: true, order });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+}
+
+// API to verify Razorpay payment
+const verifyRazorpay = async (req, res) => {
+    try {
+        const { razorpay_order_id } = req.body;
+        const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id);
+
+        if (orderInfo.status === 'paid') {
+            await appointmentModel.findByIdAndUpdate(orderInfo.receipt, { 
+                payment: true 
+            });
+            res.json({ success: true, message: "Payment successful" });
+        } else {
+            res.status(400).json({ success: false, message: "Payment failed" });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+}
+
+// API for Stripe payment
+const paymentStripe = async (req, res) => {
+    try {
+        const { appointmentId } = req.body;
+        const { origin } = req.headers;
+
+        const appointmentData = await appointmentModel.findById(appointmentId);
+
+        if (!appointmentData || appointmentData.cancelled) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Appointment cancelled or not found" 
+            });
+        }
+
+        const session = await stripeInstance.checkout.sessions.create({
+            success_url: `${origin}/verify?success=true&appointmentId=${appointmentData._id}`,
+            cancel_url: `${origin}/verify?success=false&appointmentId=${appointmentData._id}`,
+            line_items: [{
+                price_data: {
+                    currency: process.env.CURRENCY.toLowerCase(),
+                    product_data: {
+                        name: "Appointment Fees"
+                    },
+                    unit_amount: appointmentData.amount * 100
+                },
+                quantity: 1
+            }],
+            mode: 'payment',
+        });
+
+        res.json({ success: true, session_url: session.url });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+}
+
+// Add proper error handling for payment verification
+const verifyStripe = async (req, res) => {
+    try {
+        const { appointmentId, success } = req.body;
+
+        if (!appointmentId) {
+            return res.status(400).json({
+                success: false,
+                message: "Appointment ID is required"
+            });
+        }
+
+        const appointment = await appointmentModel.findById(appointmentId);
+        if (!appointment) {
+            return res.status(404).json({
+                success: false,
+                message: "Appointment not found"
+            });
+        }
+
+        if (success === "true") {
+            await appointmentModel.findByIdAndUpdate(appointmentId, { 
+                payment: true,
+                paymentDate: Date.now()
+            });
+            return res.json({
+                success: true,
+                message: "Payment successful"
+            });
+        }
+
+        return res.json({
+            success: false,
+            message: "Payment failed"
+        });
+
+    } catch (error) {
+        console.error('Stripe verification error:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Payment verification failed"
+        });
+    }
+};
+
+// API for email verification
 const handleEmailVerification = async (req, res) => {
     try {
         const { token } = req.body;
-
         const result = await verifyEmailToken(token);
         
         if (result.success) {
-            // Update user's email verification status
             await userModel.findOneAndUpdate(
                 { email: result.email },
                 { emailVerified: true }
             );
-
             res.json({ 
                 success: true, 
                 message: "Email verified successfully" 
@@ -376,156 +607,6 @@ const handleEmailVerification = async (req, res) => {
     }
 };
 
-// API to cancel appointment
-const cancelAppointment = async (req, res) => {
-    try {
-        const { userId, appointmentId } = req.body
-        const appointmentData = await appointmentModel.findById(appointmentId)
-
-        // verify appointment user 
-        if (appointmentData.userId !== userId) {
-            return res.json({ success: false, message: 'Unauthorized action' })
-        }
-
-        await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
-
-        // releasing doctor slot 
-        const { docId, slotDate, slotTime } = appointmentData
-
-        const doctorData = await doctorModel.findById(docId)
-
-        let slots_booked = doctorData.slots_booked
-
-        slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime)
-
-        await doctorModel.findByIdAndUpdate(docId, { slots_booked })
-
-        res.json({ success: true, message: 'Appointment Cancelled' })
-
-    } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
-    }
-}
-
-// API to get user appointments for frontend my-appointments page
-const listAppointment = async (req, res) => {
-    try {
-        const { userId } = req.body
-        const appointments = await appointmentModel.find({ userId })
-
-        res.json({ success: true, appointments })
-
-    } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
-    }
-}
-
-// API to make payment of appointment using razorpay
-const paymentRazorpay = async (req, res) => {
-    try {
-        const { appointmentId } = req.body
-        const appointmentData = await appointmentModel.findById(appointmentId)
-
-        if (!appointmentData || appointmentData.cancelled) {
-            return res.json({ success: false, message: 'Appointment Cancelled or not found' })
-        }
-
-        // creating options for razorpay payment
-        const options = {
-            amount: appointmentData.amount * 100,
-            currency: process.env.CURRENCY,
-            receipt: appointmentId,
-        }
-
-        // creation of an order
-        const order = await razorpayInstance.orders.create(options)
-
-        res.json({ success: true, order })
-
-    } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
-    }
-}
-
-// API to verify payment of razorpay
-const verifyRazorpay = async (req, res) => {
-    try {
-        const { razorpay_order_id } = req.body
-        const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id)
-
-        if (orderInfo.status === 'paid') {
-            await appointmentModel.findByIdAndUpdate(orderInfo.receipt, { payment: true })
-            res.json({ success: true, message: "Payment Successful" })
-        }
-        else {
-            res.json({ success: false, message: 'Payment Failed' })
-        }
-    } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
-    }
-}
-
-// API to make payment of appointment using Stripe
-const paymentStripe = async (req, res) => {
-    try {
-        const { appointmentId } = req.body
-        const { origin } = req.headers
-
-        const appointmentData = await appointmentModel.findById(appointmentId)
-
-        if (!appointmentData || appointmentData.cancelled) {
-            return res.json({ success: false, message: 'Appointment Cancelled or not found' })
-        }
-
-        const currency = process.env.CURRENCY.toLocaleLowerCase()
-
-        const line_items = [{
-            price_data: {
-                currency,
-                product_data: {
-                    name: "Appointment Fees"
-                },
-                unit_amount: appointmentData.amount * 100
-            },
-            quantity: 1
-        }]
-
-        const session = await stripeInstance.checkout.sessions.create({
-            success_url: `${origin}/verify?success=true&appointmentId=${appointmentData._id}`,
-            cancel_url: `${origin}/verify?success=false&appointmentId=${appointmentData._id}`,
-            line_items: line_items,
-            mode: 'payment',
-        })
-
-        res.json({ success: true, session_url: session.url });
-
-    } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
-    }
-}
-
-const verifyStripe = async (req, res) => {
-    try {
-        const { appointmentId, success } = req.body
-
-        if (success === "true") {
-            await appointmentModel.findByIdAndUpdate(appointmentId, { payment: true })
-            return res.json({ success: true, message: 'Payment Successful' })
-        }
-
-        res.json({ success: false, message: 'Payment Failed' })
-
-    } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
-    }
-}
-
 export {
     loginUser,
     registerUser,
@@ -539,7 +620,6 @@ export {
     paymentStripe,
     verifyStripe,
     sendOtpHandler as sendOtp,     
-    verifyOtpHandler as verifyOtp, 
+    verifyOtpHandler as verifyOtp,  
     handleEmailVerification
-}
-
+};

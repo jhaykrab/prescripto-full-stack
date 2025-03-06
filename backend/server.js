@@ -6,12 +6,10 @@ import connectCloudinary from "./config/cloudinary.js";
 import userRouter from "./routes/userRoute.js";
 import doctorRouter from "./routes/doctorRoute.js";
 import adminRouter from "./routes/adminRoute.js";
-import smsRouter from "./routes/smsRoutes.js"; 
+import smsRouter from "./routes/smsRoutes.js";  
 import { EventEmitter } from 'events';
 
-
 EventEmitter.defaultMaxListeners = 15;
-
 
 // app config
 const app = express();
@@ -23,17 +21,32 @@ connectCloudinary();
 app.use(express.json());
 app.use(cors());
 
-
 // api endpoints
 app.use('/api/user', userRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/doctor", doctorRouter);
 app.use("/api/sms", smsRouter);
 
-
-
 app.get("/", (req, res) => {
   res.send("API Working");
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found'
+  });
 });
 
 app.listen(port, () => console.log(`Server started on PORT:${port}`));
