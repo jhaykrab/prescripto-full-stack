@@ -11,18 +11,51 @@ export const formatPhoneNumber = (phoneNumber) => {
 
 export const storeOtp = (phoneNumber, otp, expiresAt) => {
     const formattedPhone = formatPhoneNumber(phoneNumber);
-    otpStore.set(formattedPhone, {
+    
+    // Clear any existing OTP
+    otpStore.delete(formattedPhone);
+    
+    // Store new OTP
+    const otpData = { otp, expiresAt };
+    otpStore.set(formattedPhone, otpData);
+    
+    console.log('Stored new OTP:', {
+        phone: formattedPhone,
         otp,
-        expiresAt
+        expiresAt: new Date(expiresAt).toISOString()
     });
+    
+    return otpData;
 };
 
 export const getStoredOtp = (phoneNumber) => {
     const formattedPhone = formatPhoneNumber(phoneNumber);
-    return otpStore.get(formattedPhone);
+    const storedData = otpStore.get(formattedPhone);
+    
+    console.log('Retrieving OTP:', {
+        phone: formattedPhone,
+        found: !!storedData,
+        expired: storedData ? Date.now() > storedData.expiresAt : false
+    });
+    
+    if (!storedData) {
+        return null;
+    }
+    
+    // Check expiration
+    if (Date.now() > storedData.expiresAt) {
+        otpStore.delete(formattedPhone);
+        return null;
+    }
+    
+    return storedData;
 };
 
 export const removeOtp = (phoneNumber) => {
     const formattedPhone = formatPhoneNumber(phoneNumber);
-    otpStore.delete(formattedPhone);
+    const deleted = otpStore.delete(formattedPhone);
+    console.log('Removed OTP:', {
+        phone: formattedPhone,
+        wasDeleted: deleted
+    });
 };

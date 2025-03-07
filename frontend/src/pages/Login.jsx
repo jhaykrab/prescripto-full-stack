@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import VerificationModal from '../components/VerificationModal';
 import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { auth } from '../config/firebase';
+import { formatPhoneNumber } from '../utils/utils.js';
 import PhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
 import '../styles/phoneInput.css';
@@ -103,65 +104,18 @@ const Login = () => {
         };
     }, []);
 
-    const RATE_LIMIT_TIMEOUT = 60000; 
-    const MAX_ATTEMPTS = 3; 
-
-
-    const initializeRecaptcha = async () => {
-        try {
-            // Clear existing reCAPTCHA if it exists
-            if (window.recaptchaVerifier) {
-                await window.recaptchaVerifier.clear();
-                window.recaptchaVerifier = null;
-            }
-
-            const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-                size: 'normal', // Changed from 'invisible' to 'normal'
-                callback: () => {
-                    console.log('reCAPTCHA verified successfully');
-                },
-                'expired-callback': () => {
-                    toast.error('reCAPTCHA expired. Please try again.');
-                    if (window.recaptchaVerifier) {
-                        window.recaptchaVerifier.clear();
-                        window.recaptchaVerifier = null;
-                    }
-                }
-            });
-
-            await verifier.render();
-            return verifier;
-        } catch (error) {
-            console.error('Error initializing reCAPTCHA:', error);
-            throw error;
-        }
-    };
-
-    const validatePhoneNumber = (phone) => {
-        // Remove any non-digit characters
-        const cleaned = phone.replace(/\D/g, '');
-        
-        // Check if it's a valid Philippine mobile number
-        // Should be 11 digits starting with '09' or 12 digits starting with '639'
-        if (cleaned.startsWith('09') && cleaned.length === 11) {
-            return true;
-        }
-        if (cleaned.startsWith('639') && cleaned.length === 12) {
-            return true;
-        }
-        return false;
-    };
+    
 
     const handleSendOtp = async () => {
         setLoading(true);
         const { verificationMethod, phone, email } = formData;
-
+    
         if (!verificationMethod) {
             toast.error('Please select a verification method');
             setLoading(false);
             return;
         }
-
+    
         try {
             let target;
             if (verificationMethod === 'phone') {
@@ -170,17 +124,7 @@ const Login = () => {
                     setLoading(false);
                     return;
                 }
-                // Format the phone number
-                let formattedPhone = phone.replace(/[^\d+]/g, '');
-                if (formattedPhone.startsWith('0')) {
-                    formattedPhone = '63' + formattedPhone.substring(1);
-                } else if (!formattedPhone.startsWith('63') && !formattedPhone.startsWith('+63')) {
-                    formattedPhone = '63' + formattedPhone;
-                }
-                if (!formattedPhone.startsWith('+')) {
-                    formattedPhone = '+' + formattedPhone;
-                }
-                target = formattedPhone;
+                target = phone.startsWith('+') ? phone : `+${phone}`;
             } else {
                 if (!email) {
                     toast.error('Please enter an email address');
@@ -189,12 +133,14 @@ const Login = () => {
                 }
                 target = email.trim();
             }
-
+    
+            console.log("📩 Sending OTP to:", target);
+    
             const response = await axios.post(`${backendUrl}/api/user/send-otp`, {
                 target: target,
                 method: verificationMethod
             });
-
+    
             if (response.data.success) {
                 setOtpState(prev => ({
                     ...prev,
@@ -202,66 +148,57 @@ const Login = () => {
                     isModalOpen: true,
                     otpTimeout: false
                 }));
-                toast.success(`Verification code sent to your ${verificationMethod}`);
+                toast.success(`Verification code sent to ${verificationMethod}`);
             }
         } catch (error) {
             console.error(`${verificationMethod} verification error:`, error);
             const errorMessage = error.response?.data?.message || 'Failed to send verification code';
             toast.error(errorMessage);
-            
-            if (error.response?.status === 400 && error.response?.data?.message?.includes('wait')) {
-                setOtpState(prev => ({ ...prev, otpTimeout: true }));
-            }
         } finally {
             setLoading(false);
         }
     };
+    
 
     const handleVerifyOtp = async (otpInput) => {
-        const { verificationMethod, email } = formData;
-
-        try {
-            if (verificationMethod === 'email') {
-                const response = await axios.post(`${backendUrl}/api/user/verify-otp`, {
-                    target: email.trim(),
-                    otp: otpInput,
-                    method: 'email'
-                });
-
-                if (!response.data.success) {
-                    throw new Error(response.data.message || 'Verification failed');
-                }
-
-                return true;
-            }
-            return false;
-        } catch (error) {
-            console.error('OTP Verification Error:', error);
-            toast.error(error.response?.data?.message || 'Invalid OTP. Please try again.');
-            return false;
-        }
-    };
-
-    // Update the isValidPhilippineNumber function
-    const isValidPhilippineNumber = (phone) => {
-        if (!phone) return false;
-        
-        // Remove any spaces or special characters except plus sign
-        const cleanPhone = phone.replace(/[^\d+]/g, '');
-        
-        // Convert to international format if needed
-        let formattedPhone = cleanPhone;
-        if (cleanPhone.startsWith('09')) {
-            formattedPhone = '+63' + cleanPhone.substring(1);
-        } else if (cleanPhone.startsWith('63')) {
-            formattedPhone = '+' + cleanPhone;
-        }
-        
-        // Check if the final format matches +63 followed by 10 digits
-        const isValid = /^\+63\d{10}$/.test(formattedPhone);
-        return isValid;
-    };
+        const { verificationMethod, email, phone } = formData;
+        let target = verificationMethod === 'phone' ? phone : email;
     
+        if (!target) {
+            toast.error('Please request a new OTP');
+            return;
+        }
+    
+        console.log("🔍 Verifying OTP:", { target, otp: otpInput });
+    
+        try {
+            const response = await axios.post(`${backendUrl}/api/user/verify-otp`, {
+                target: target.trim(),
+                otp: otpInput,
+                method: verificationMethod
+            });
+    
+            if (response.data.success) {
+                setOtpState(prev => ({
+                    ...prev,
+                    otpVerified: true,
+                    isModalOpen: false
+                }));
+                toast.success("OTP verified successfully!");
+            } else {
+                throw new Error(response.data.message || 'Verification failed');
+            }
+        } catch (error) {
+            console.error('❌ OTP Verification Error:', error);
+            toast.error(error.response?.data?.message || 'Invalid OTP. Please try again.');
+        }
+    };
+
+    const isValidPhilippineNumber = (phoneNumber) => {
+        const regex = /^\+639\d{9}$/;
+        return regex.test(phoneNumber);
+    };
+      
 
     const onSubmitHandler = async (event) => {
         event.preventDefault();
@@ -550,12 +487,10 @@ const Login = () => {
                             isModalOpen: false 
                         }));
                     }}
-                    target={formData.email}
-                    verificationMethod="email"
-                    handleSendOtp={handleSendOtp}
-                    handleVerifyOtp={handleVerifyOtp}
+                    target={formData.verificationMethod === 'phone' ? formData.phone : formData.email}
+                    verificationMethod={formData.verificationMethod}
                     otpTimeout={otpTimeout}
-                    setOtpTimeout={handleOtpTimeout}
+                    setOtpTimeout={setOtpTimeout}
                 />
             </form>
         </div>

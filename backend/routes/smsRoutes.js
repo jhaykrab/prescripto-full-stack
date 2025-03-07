@@ -8,25 +8,15 @@ export const sendOtpHandler = async (req, res) => {
     try {
         const { target, method } = req.body;
 
-        if (!target || !method) {
+        if (!target || method !== 'phone') {
             return res.status(400).json({
                 success: false,
-                message: "All fields are required"
+                message: "Invalid request for SMS OTP"
             });
         }
 
-        const formattedTarget = formatPhoneNumber(target);
-        const storedData = getStoredOtp(formattedTarget);
-
-        if (storedData && Date.now() < storedData.expiresAt) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please wait for the current OTP to expire before requesting a new one'
-            });
-        }
-
-        const result = await sendSmsOtp(target);
-
+        await sendSmsOtp(target);
+        
         return res.json({
             success: true,
             message: 'OTP sent successfully via SMS'
@@ -57,7 +47,7 @@ export const verifyOtp = async (req, res) => {
         if (!storedData) {
             return res.status(400).json({
                 success: false,
-                message: 'No OTP found. Please request a new one.'
+                message: 'Please request a new OTP'
             });
         }
 
@@ -76,16 +66,16 @@ export const verifyOtp = async (req, res) => {
             });
         }
 
-        // If verification successful, remove the OTP
+        // If we get here, OTP is valid
         removeOtp(formattedTarget);
-
+        
         return res.json({
             success: true,
             message: 'OTP verified successfully'
         });
     } catch (error) {
-        console.error('Verify OTP Error:', error);
-        return res.status(500).json({
+        console.error('❌ Verify OTP Error:', error);
+        return res.status(400).json({
             success: false,
             message: error.message || 'Failed to verify OTP'
         });
@@ -95,4 +85,4 @@ export const verifyOtp = async (req, res) => {
 router.post('/send-otp', sendOtpHandler);
 router.post('/verify-otp', verifyOtp);
 
-export default router;  // Changed this line to use default export
+export default router;

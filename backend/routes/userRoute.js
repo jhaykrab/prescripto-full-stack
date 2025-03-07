@@ -18,40 +18,27 @@ userRouter.post("/send-otp", async (req, res) => {
             });
         }
 
-        if (method === 'email') {
-            try {
-                // Generate a 6-digit OTP
-                const otp = Math.floor(100000 + Math.random() * 900000).toString();
-                
-                // Log the OTP for debugging (remove in production)
-                console.log('Generated OTP:', otp);
-                
-                // Pass both the target email and the OTP
-                const result = await sendEmailOTP(target, 'User', otp);
-                
-                if (!result.success) {
-                    throw new Error(result.message || 'Failed to send email OTP');
-                }
-                
-                return res.json({
-                    success: true,
-                    message: 'OTP sent successfully via email'
-                });
-            } catch (error) {
-                console.error('Email OTP Error:', error);
-                return res.status(500).json({
-                    success: false,
-                    message: 'Failed to send email OTP'
-                });
-            }
-        } else if (method === 'phone') {
+        if (method === 'phone') {
+            // Forward directly to SMS routes handler
             return sendOtpHandler(req, res);
-        } else {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid verification method"
+        } else if (method === 'email') {
+            const otp = Math.floor(100000 + Math.random() * 900000).toString();
+            const result = await sendEmailOTP(target, 'User', otp);
+            
+            if (!result.success) {
+                throw new Error(result.message || 'Failed to send email OTP');
+            }
+            
+            return res.json({
+                success: true,
+                message: 'OTP sent successfully via email'
             });
         }
+
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid verification method'
+        });
     } catch (error) {
         console.error('Send OTP Error:', error);
         return res.status(500).json({

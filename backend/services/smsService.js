@@ -1,127 +1,99 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
-import { storeOtp, formatPhoneNumber } from '../utils/otpStore.js';
+import { formatPhoneNumber } from '../utils/utils.js';
+import { storeOtp, getStoredOtp, removeOtp } from '../utils/otpStore.js';
 
 dotenv.config();
 
 const TEXTLINK_API_KEY = process.env.TEXTLINK_API_KEY;
-const TEXTLINK_BASE_URL = 'https://textlinksms.com/api';
-const SERVICE_NAME = process.env.APP_NAME || 'Prescripto';
+const TEXTLINK_BASE_URL = process.env.TEXTLINK_BASE_URL;
+const SERVICE_NAME = process.env.APP_NAME;
 
+/**
+ * Sends an OTP to the specified phone number.
+ */
 export const sendOtp = async (phoneNumber) => {
     try {
         if (!TEXTLINK_API_KEY) {
             throw new Error('TextLink API key is missing');
         }
 
-        // Format phone number to ensure it starts with '+'
-        let formattedPhone = phoneNumber.replace(/[^\d+]/g, '');
-        if (!formattedPhone.startsWith('+')) {
-            formattedPhone = '+' + formattedPhone;
+        const formattedPhone = formatPhoneNumber(phoneNumber);
+        
+        // Check if there's an existing non-expired OTP
+        const existingOtp = getStoredOtp(formattedPhone);
+        if (existingOtp) {
+            throw new Error('Please wait before requesting a new OTP');
         }
 
-        console.log('Sending OTP request to TextLink API:', {
-            phoneNumber: formattedPhone,
-            serviceName: SERVICE_NAME
-        });
-
-        const response = await axios({
-            method: 'post',
-            url: `${TEXTLINK_BASE_URL}/send-code`,
+        // Send the OTP request to SMS API first
+        const response = await axios.post(`${TEXTLINK_BASE_URL}/send-code`, {
+            phone_number: formattedPhone,
+            service_name: SERVICE_NAME
+        }, {
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${TEXTLINK_API_KEY}`
-            },
-            data: {
-                phone_number: formattedPhone,
-                service_name: SERVICE_NAME,
-                expiration_time: 5 * 60 * 1000 // 5 minutes
             }
         });
 
-        if (!response.data.ok) {
-            console.error('TextLink API Error:', response.data);
+        console.log('TextLink API Response:', JSON.stringify(response.data, null, 2));
+
+        if (!response?.data?.ok) {
             throw new Error(response.data.message || 'Failed to send verification code');
         }
 
-        // Store the OTP code
-        const { code } = response.data;
-        storeOtp(formattedPhone, code, Date.now() + (5 * 60 * 1000)); // Store for 5 minutes
+        // Get the OTP from the API response
+        const otp = response.data.code; // Adjust this based on your API response structure
+        if (!otp) {
+            throw new Error('No OTP received from SMS service');
+        }
+
+        // Store the OTP received from the API
+        const expirationTime = Date.now() + (5 * 60 * 1000); // 5 minutes
+        storeOtp(formattedPhone, otp, expirationTime);
 
         return {
             success: true,
             phoneNumber: formattedPhone
         };
-
     } catch (error) {
-        console.error('Send OTP Error:', {
-            message: error.message,
-            response: error.response?.data,
-            status: error.response?.status,
-            phoneNumber: phoneNumber
-        });
-        
-        if (error.response?.data?.message) {
-            throw new Error(error.response.data.message);
-        } else if (error.response?.status === 401) {
-            throw new Error('Invalid API key or authentication failed');
-        } else if (error.response?.status === 429) {
-            throw new Error('Too many requests. Please try again later');
-        } else {
-            throw new Error('Failed to send verification code. Please try again');
-        }
+        console.error('Send OTP Error:', error);
+        throw error;
     }
 };
 
+/**
+ * Verifies an OTP for the specified phone number.
+ */
 export const verifyOtp = async (phoneNumber, code) => {
     try {
-        if (!TEXTLINK_API_KEY) {
-            throw new Error('TextLink API key is missing');
-        }
-
         const formattedPhone = formatPhoneNumber(phoneNumber);
-
-        console.log('Verifying OTP:', {
-            phoneNumber: formattedPhone,
-            codeLength: code.length
-        });
-
-        const response = await axios({
-            method: 'post',
-            url: `${TEXTLINK_BASE_URL}/verify-code`,
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${TEXTLINK_API_KEY}`
-            },
-            data: {
-                phone_number: formattedPhone,
-                code: code
-            }
-        });
-
-        // Log the complete verification response
-        console.log('TextLink Verification Response:', {
-            status: response.status,
-            data: response.data,
-            phoneNumber: formattedPhone
-        });
-
-        return response.data.ok;
-
-    } catch (error) {
-        console.error('Verify OTP Error:', {
-            message: error.message,
-            response: error.response?.data,
-            status: error.response?.status,
-            phoneNumber: phoneNumber
-        });
-
-        if (error.response?.data?.message) {
-            throw new Error(error.response.data.message);
-        } else if (error.response?.status === 401) {
-            throw new Error('Invalid API key or authentication failed');
-        } else {
-            throw new Error('Failed to verify code. Please try again');
+        const storedData = getStoredOtp(formattedPhone);
+        
+        if (!storedData) {
+            throw new Error('Please request a new OTP');
         }
+
+        if (Date.now() > storedData.expiresAt) {
+            removeOtp(formattedPhone);
+            throw new Error('OTP has expired. Please request a new one.');
+        }
+
+        const isValid = storedData.otp === code;
+        
+        // Always remove the OTP after verification attempt
+        removeOtp(formattedPhone);
+        
+        if (!isValid) {
+            throw new Error('Invalid OTP');
+        }
+
+        return true;
+    } catch (error) {
+        console.error('Verify OTP Error:', error);
+        throw error;
     }
 };
+
+

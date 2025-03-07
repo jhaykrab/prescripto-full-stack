@@ -31,6 +31,13 @@ app.get("/", (req, res) => {
   res.send("API Working");
 });
 
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log('Body:', JSON.stringify(req.body, null, 2)); 
+  next();
+});
+
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Error:', err);

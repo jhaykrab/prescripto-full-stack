@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import validator from "validator";
+import { formatPhoneNumber } from "../utils/utils.js";
 import userModel from "../models/userModel.js";
 import doctorModel from "../models/doctorModel.js";
 import appointmentModel from "../models/appointmentModel.js";
@@ -32,6 +33,8 @@ const otpStore = new Map();
 // API to send OTP
 const sendOtpHandler = async (req, res) => {
     try {
+        console.log("📩 Incoming OTP Send Request:", req.body);
+
         const { target, method } = req.body;
 
         if (!target || !method) {
@@ -41,14 +44,28 @@ const sendOtpHandler = async (req, res) => {
             });
         }
 
+        let formattedTarget = formatPhoneNumber(target);
+        const otp = Math.floor(100000 + Math.random() * 900000).toString(); // Generate OTP
+
         if (method === 'phone') {
-            const result = await sendOtp(target);
-            otpStore.set(target, {
-                otp: result.otp,
-                expiresAt: Date.now() + 5 * 60 * 1000 // 5 minutes
+            await sendOtp(formattedTarget);  // Send OTP via SMS
+
+            // 🔥 Store OTP in memory with expiration (5 minutes)
+            otpStore.set(formattedTarget, { 
+                otp, 
+                expiresAt: Date.now() + 5 * 60 * 1000 
             });
+
+            console.log(`✅ OTP Stored: ${otp} for ${formattedTarget}`);
         } else if (method === 'email') {
-            await sendEmailOTP(target);
+            await sendEmailOTP(target, undefined, otp);  // Send OTP via Email
+
+            otpStore.set(target, { 
+                otp, 
+                expiresAt: Date.now() + 5 * 60 * 1000 
+            });
+
+            console.log(`✅ OTP Stored: ${otp} for email ${target}`);
         } else {
             return res.status(400).json({
                 success: false,
@@ -61,7 +78,7 @@ const sendOtpHandler = async (req, res) => {
             message: `OTP sent successfully to ${target}` 
         });
     } catch (error) {
-        console.error('Send OTP error:', error);
+        console.error('❌ Send OTP Error:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Failed to send OTP' 
@@ -69,82 +86,96 @@ const sendOtpHandler = async (req, res) => {
     }
 };
 
-// Consolidate duplicate OTP verification logic into a single function
-const verifyOtpInternal = async (target, otp, method) => {
-    try {
-        if (method === 'phone') {
-            // Format the number consistently
-            let formattedNumber = target.replace(/[^\d]/g, '');
-            if (formattedNumber.startsWith('0')) {
-                formattedNumber = '63' + formattedNumber.substring(1);
-            } else if (!formattedNumber.startsWith('63')) {
-                formattedNumber = '63' + formattedNumber;
-            }
-            
-            return await verifyOtp(formattedNumber, otp);
-        } else if (method === 'email') {
-            return verifyEmailOTP(target, otp);
-        }
-        return false;
-    } catch (error) {
-        console.error('Internal OTP verification error:', error);
-        throw error;
-    }
-};
 
-// Unified OTP verification handler
 const verifyOtpHandler = async (req, res) => {
     try {
+        console.log("🔍 Incoming OTP Verification Request:", req.body);
+
         const { target, otp, method } = req.body;
 
         if (!target || !otp || !method) {
+            console.error("❌ Missing required fields in OTP verification");
             return res.status(400).json({
                 success: false,
                 message: "Target, OTP, and method are required"
             });
         }
 
-        // Format the phone number consistently for lookup
-        let lookupTarget = target;
+        let formattedTarget = formatPhoneNumber(target);
+        console.log("📞 Formatted Target for Verification:", formattedTarget);
+
+        let isValid = false;
+
         if (method === 'phone') {
-            // Remove any non-digit characters
-            lookupTarget = target.replace(/[^\d]/g, '');
-            // Ensure it starts with '63'
-            if (lookupTarget.startsWith('0')) {
-                lookupTarget = '63' + lookupTarget.substring(1);
-            } else if (!lookupTarget.startsWith('63')) {
-                lookupTarget = '63' + lookupTarget;
+            // 🔥 Retrieve stored OTP from memory
+            const storedOtp = otpStore.get(formattedTarget);
+
+            if (!storedOtp) {
+                console.error("❌ No OTP found for this number");
+                return res.status(400).json({
+                    success: false,
+                    message: "Please request a new OTP"
+                });
             }
+
+            // 🔥 Check if OTP is expired
+            if (Date.now() > storedOtp.expiresAt) {
+                otpStore.delete(formattedTarget); // Remove expired OTP
+                console.error("❌ OTP Expired");
+                return res.status(400).json({
+                    success: false,
+                    message: "OTP expired. Please request a new one."
+                });
+            }
+
+            // 🔥 Compare stored OTP with entered OTP
+            if (storedOtp.otp !== otp) {
+                console.error("❌ Incorrect OTP entered");
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid OTP"
+                });
+            }
+
+            // ✅ If OTP is correct, delete it to prevent reuse
+            otpStore.delete(formattedTarget);
+            console.log("✅ OTP Verified Successfully!");
+
+            isValid = true;
+
+        } else if (method === 'email') {
+            const result = await verifyEmailOTP(otp, target);
+            isValid = result.success;
+        } else {
+            console.error("❌ Invalid verification method");
+            return res.status(400).json({
+                success: false,
+                message: "Invalid verification method"
+            });
         }
-
-        console.log('Verification attempt:', {
-            originalTarget: target,
-            lookupTarget,
-            method,
-            timestamp: new Date().toISOString()
-        });
-
-        const isValid = await verifyOtpInternal(lookupTarget, otp, method);
 
         if (isValid) {
             return res.json({
                 success: true,
-                message: 'OTP verified successfully'
+                message: "OTP verified successfully"
             });
         }
 
+        console.error("❌ OTP verification failed.");
         return res.status(400).json({
             success: false,
-            message: 'Invalid OTP'
+            message: "Invalid OTP"
         });
+
     } catch (error) {
-        console.error('Verify OTP error:', error);
+        console.error("❌ OTP Verification Error:", error);
         return res.status(500).json({
             success: false,
-            message: error.message || 'Failed to verify OTP'
+            message: "Failed to verify OTP"
         });
     }
 };
+
 
 // API to register user
 const registerUser = async (req, res) => {
