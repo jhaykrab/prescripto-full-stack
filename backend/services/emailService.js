@@ -7,6 +7,71 @@ dotenv.config();
 // Initialize SendGrid with API key
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
+
+export const sendEmailOTP = async (email, name, otp) => {
+  try {
+    // Validate inputs
+    if (!email || !otp) {
+      throw new Error('Email and OTP are required');
+    }
+
+    // Validate SendGrid configuration
+    if (!process.env.SENDGRID_API_KEY) {
+      throw new Error('SendGrid API key is missing');
+    }
+
+    if (!process.env.SENDGRID_VERIFIED_SENDER) {
+      throw new Error('SendGrid verified sender email is missing');
+    }
+
+    // Log configuration (remove in production)
+    console.log('SendGrid Configuration:', {
+      apiKeyPresent: !!process.env.SENDGRID_API_KEY,
+      sender: process.env.SENDGRID_VERIFIED_SENDER,
+      recipient: email
+    });
+
+    const msg = {
+      to: email,
+      from: process.env.SENDGRID_VERIFIED_SENDER,
+      subject: 'Your Verification Code - Montervirgen',
+      text: `Your verification code is: ${otp}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+          <h2>Your Verification Code</h2>
+          <p>Hello ${name || 'User'},</p>
+          <p>Your verification code is: <strong>${otp}</strong></p>
+          <p>This code will expire in 5 minutes.</p>
+        </div>
+      `
+    };
+
+    const response = await sgMail.send(msg);
+    
+    if (response[0].statusCode === 202) {
+      return {
+        success: true,
+        message: 'Email sent successfully'
+      };
+    } else {
+      throw new Error(`Failed to send email. Status: ${response[0].statusCode}`);
+    }
+  } catch (error) {
+    // More detailed error logging
+    console.error('Send Email OTP Error Details:', {
+      message: error.message,
+      code: error.code,
+      response: error.response?.body
+    });
+    
+    if (error.code === 401) {
+      throw new Error('Invalid SendGrid API key. Please check your configuration.');
+    }
+    
+    throw new Error(error.message || 'Email service configuration error');
+  }
+};
+
 // Define templates first before using them
 const templates = {
   welcome: {
@@ -218,40 +283,7 @@ async function sendEmailVerification(userId, email, name) {
   );
 }
 
-export const sendEmailOTP = async (email, name, otp) => {
-  try {
-    // Store the OTP
-    await storeOtp(email, otp, Date.now() + (5 * 60 * 1000)); // Store for 5 minutes
 
-    const emailData = {
-      name: name || 'User',
-      otp: otp
-    };
-
-    // Use the OTP template instead of otp_template
-    const result = await sendEmailNotification(
-      email,
-      templates.otp.subject,
-      emailData,
-      'otp'  // Changed from 'otp_template' to 'otp'
-    );
-
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to send email');
-    }
-
-    return {
-      success: true,
-      message: 'OTP sent successfully'
-    };
-  } catch (error) {
-    console.error('Send Email OTP Error:', error);
-    return {
-      success: false,
-      message: error.message || 'Failed to send OTP'
-    };
-  }
-};
 
 export {
   sendEmailVerification,

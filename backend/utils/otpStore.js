@@ -2,25 +2,25 @@
 const otpStore = new Map();
 
 export const formatPhoneNumber = (phoneNumber) => {
-    let formatted = phoneNumber.replace(/[^\d+]/g, '');
-    if (!formatted.startsWith('+')) {
-        formatted = '+' + formatted;
+    // Only format if it's a phone number
+    if (phoneNumber.match(/^\+?\d+$/)) {
+        let formatted = phoneNumber.replace(/[^\d+]/g, '');
+        if (!formatted.startsWith('+')) {
+            formatted = '+' + formatted;
+        }
+        return formatted;
     }
-    return formatted;
+    // Return as-is if it's not a phone number (e.g., email)
+    return phoneNumber;
 };
 
-export const storeOtp = (phoneNumber, otp, expiresAt) => {
-    const formattedPhone = formatPhoneNumber(phoneNumber);
-    
-    // Clear any existing OTP
-    otpStore.delete(formattedPhone);
-    
+export const storeOtp = (target, otp, expiresAt) => {
     // Store new OTP
     const otpData = { otp, expiresAt };
-    otpStore.set(formattedPhone, otpData);
+    otpStore.set(target, otpData);
     
     console.log('Stored new OTP:', {
-        phone: formattedPhone,
+        target,
         otp,
         expiresAt: new Date(expiresAt).toISOString()
     });
@@ -28,34 +28,17 @@ export const storeOtp = (phoneNumber, otp, expiresAt) => {
     return otpData;
 };
 
-export const getStoredOtp = (phoneNumber) => {
-    const formattedPhone = formatPhoneNumber(phoneNumber);
-    const storedData = otpStore.get(formattedPhone);
-    
-    console.log('Retrieving OTP:', {
-        phone: formattedPhone,
-        found: !!storedData,
-        expired: storedData ? Date.now() > storedData.expiresAt : false
-    });
-    
-    if (!storedData) {
-        return null;
-    }
-    
-    // Check expiration
-    if (Date.now() > storedData.expiresAt) {
-        otpStore.delete(formattedPhone);
-        return null;
-    }
-    
-    return storedData;
+export const getStoredOtp = (target) => {
+    return otpStore.get(target);
 };
 
-export const removeOtp = (phoneNumber) => {
-    const formattedPhone = formatPhoneNumber(phoneNumber);
-    const deleted = otpStore.delete(formattedPhone);
-    console.log('Removed OTP:', {
-        phone: formattedPhone,
-        wasDeleted: deleted
-    });
+export const removeOtp = (target) => {
+    return otpStore.delete(target);
+};
+
+export default {
+    storeOtp,
+    getStoredOtp,
+    removeOtp,
+    formatPhoneNumber
 };

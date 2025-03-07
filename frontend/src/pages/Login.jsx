@@ -77,33 +77,19 @@ const Login = () => {
         }
     };
 
+
     const isFormValid = () => {
-        const { state, name, password, verificationMethod, phone, email } = formData;
+        const { state } = formData;
         const { otpVerified } = otpState;
-    
+
         if (state === 'Sign Up') {
-            // Basic validations
-            if (!name || !password || !otpVerified) {
-                return false;
-            }
-            if (!otpVerified) {
-                return verificationMethod === 'phone' ? !!phone : !!email;
-            }
-            return !!phone && !!email && isValidPhilippineNumber(phone);
+            // Enable button as soon as OTP is verified
+            return otpVerified;
         }
-        return email && password;
+
+        // Login state validation remains unchanged
+        return formData.email?.trim() && formData.password?.trim();
     };
-
-
-    useEffect(() => {
-        return () => {
-            if (window.recaptchaVerifier) {
-                window.recaptchaVerifier.clear();
-                window.recaptchaVerifier = null;
-            }
-        };
-    }, []);
-
     
 
     const handleSendOtp = async () => {
@@ -203,102 +189,96 @@ const Login = () => {
     const onSubmitHandler = async (event) => {
         event.preventDefault();
         const { state, name, phone, email, password, verificationMethod } = formData;
-        const { otpVerified } = otpState;
 
-        try {
-            if (state === 'Sign Up') {
-                // Validate all required fields are present
-                if (!name?.trim() || !password?.trim() || !email?.trim() || !verificationMethod) {
-                    toast.error('All fields are required');
-                    return;
-                }
+        if (state === 'Sign Up') {
+            // Validate all required fields are present
+            if (!name?.trim() || !password?.trim() || !email?.trim() || !verificationMethod) {
+                toast.error('All fields are required');
+                return;
+            }
 
-                // Format phone number for validation
-                let formattedPhone = phone.trim();
-                
-                // Remove any non-digit characters except the plus sign
-                formattedPhone = formattedPhone.replace(/[^\d+]/g, '');
-                
-                // Ensure the number starts with +63
-                if (formattedPhone.startsWith('63')) {
-                    formattedPhone = '+' + formattedPhone;
-                } else if (formattedPhone.startsWith('09')) {
-                    formattedPhone = '+63' + formattedPhone.substring(1);
-                }
+            // Format phone number for validation
+            let formattedPhone = phone.trim();
+            
+            // Remove any non-digit characters except the plus sign
+            formattedPhone = formattedPhone.replace(/[^\d+]/g, '');
+            
+            // Ensure the number starts with +63
+            if (formattedPhone.startsWith('63')) {
+                formattedPhone = '+' + formattedPhone;
+            } else if (formattedPhone.startsWith('09')) {
+                formattedPhone = '+63' + formattedPhone.substring(1);
+            }
 
-                // Validate phone number format
-                if (!isValidPhilippineNumber(formattedPhone)) {
-                    toast.error('Please enter a valid Philippine phone number');
-                    return;
-                }
+            // Validate phone number format
+            if (!isValidPhilippineNumber(formattedPhone)) {
+                toast.error('Please enter a valid Philippine phone number');
+                return;
+            }
 
-                // Prepare registration data
-                const registrationData = {
-                    name: name.trim(),
-                    email: email.trim(),
-                    password: password.trim(),
-                    verificationMethod,
-                    phone: formattedPhone,
-                    isVerified: otpVerified
-                };
+            // Prepare registration data
+            const registrationData = {
+                name: name.trim(),
+                email: email.trim(),
+                password: password.trim(),
+                verificationMethod,
+                phone: formattedPhone,
+                isVerified: otpState.otpVerified
+            };
 
-                console.log('Registration payload:', registrationData);
+            console.log('Registration payload:', registrationData);
 
-                try {
-                    const { data } = await axios.post(`${backendUrl}/api/user/register`, registrationData);
-                    if (data.success) {
-                        localStorage.setItem('token', data.token);
-                        setToken(data.token);
-                        navigate('/');
-                        toast.success(data.message || 'Registration successful!');
-                    } else {
-                        throw new Error(data.message || 'Registration failed');
-                    }
-                } catch (error) {
-                    if (error.response) {
-                        const errorMessage = error.response.data.message;
-                        if (error.response.status === 400) {
-                            // Handle validation errors
-                            toast.error(errorMessage || 'Invalid registration data');
-                        } else if (error.response.status === 500) {
-                            // Handle server errors
-                            toast.error('Server error. Please try again later.');
-                            console.error('Server error details:', error.response.data);
-                        } else {
-                            toast.error(errorMessage || 'Registration failed');
-                        }
-                    } else if (error.request) {
-                        // Network error
-                        toast.error('Network error. Please check your connection.');
-                    } else {
-                        toast.error(error.message || 'An unexpected error occurred');
-                    }
-                    console.error('Registration error:', error.response?.data || error);
-                }
-            } else {
-                // Login logic remains unchanged
-                if (!email?.trim() || !password?.trim()) {
-                    toast.error('Email and password are required');
-                    return;
-                }
-
-                const { data } = await axios.post(`${backendUrl}/api/user/login`, {
-                    email: email.trim(),
-                    password: password.trim()
-                });
-
+            try {
+                const { data } = await axios.post(`${backendUrl}/api/user/register`, registrationData);
                 if (data.success) {
                     localStorage.setItem('token', data.token);
                     setToken(data.token);
                     navigate('/');
-                    toast.success('Login successful!');
+                    toast.success(data.message || 'Registration successful!');
                 } else {
-                    toast.error(data.message || 'Login failed');
+                    throw new Error(data.message || 'Registration failed');
                 }
+            } catch (error) {
+                if (error.response) {
+                    const errorMessage = error.response.data.message;
+                    if (error.response.status === 400) {
+                        // Handle validation errors
+                        toast.error(errorMessage || 'Invalid registration data');
+                    } else if (error.response.status === 500) {
+                        // Handle server errors
+                        toast.error('Server error. Please try again later.');
+                        console.error('Server error details:', error.response.data);
+                    } else {
+                        toast.error(errorMessage || 'Registration failed');
+                    }
+                } else if (error.request) {
+                    // Network error
+                    toast.error('Network error. Please check your connection.');
+                } else {
+                    toast.error(error.message || 'An unexpected error occurred');
+                }
+                console.error('Registration error:', error.response?.data || error);
             }
-        } catch (error) {
-            console.error('Submission error:', error);
-            toast.error('An unexpected error occurred');
+        } else {
+            // Login logic remains unchanged
+            if (!email?.trim() || !password?.trim()) {
+                toast.error('Email and password are required');
+                return;
+            }
+
+            const { data } = await axios.post(`${backendUrl}/api/user/login`, {
+                email: email.trim(),
+                password: password.trim()
+            });
+
+            if (data.success) {
+                localStorage.setItem('token', data.token);
+                setToken(data.token);
+                navigate('/');
+                toast.success('Login successful!');
+            } else {
+                toast.error(data.message || 'Login failed');
+            }
         }
     };
 
